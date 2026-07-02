@@ -205,6 +205,8 @@ openssl rand -hex 32
 3. Confirm your Auth0 application URLs match the exact origin where the Python app is running:
 
 ```text
+Application Type: Regular Web Application
+Technology: Python / Flask
 Allowed Callback URL: https://scholarhq-1.onrender.com/callback
 Allowed Logout URL:   https://scholarhq-1.onrender.com/
 ```
