@@ -168,3 +168,56 @@ In order to do so, we need a solid pitch to get accepted into the launch rogram 
 Currently we have a onboarding/account creation method. It is just not secure. We need to adjust this to create a actual usable website to go public. Once done, we can start to find a custom domain, trademark, and brand. Everything will cost money including subscriptions for the AI implementation, google calander implementation, Render hosting subscription, and of course custom domain for the Render site. I have added updated plans for the Render hosting subscription into "Discussions"
 
 WOOHOOO MONEY SPENDING!!
+
+## Auth0 Python SDK Setup
+
+This repository now includes a small Flask entrypoint (`start.py`) that follows the official Auth0 Python SDK quickstart for a Regular Web Application with server-side sessions.
+
+1. Install Python dependencies from the project root:
+
+```bash
+uv sync
+```
+
+If you are not using `uv`, install the same packages with pip:
+
+```bash
+python -m pip install "auth0-server-python>=1.0.0b1,<2" "flask[async]" python-dotenv markupsafe
+```
+
+2. Create a local `.env` file from `.env.example` and set the Auth0 values in your server environment. Keep these values server-only and do not commit `.env`.
+
+```bash
+AUTH0_DOMAIN=dev-twmic3lvibfngwhb.us.auth0.com
+AUTH0_CLIENT_ID=QZwU4ABAPCw5pLh1P2USX5kLlkim9kae
+AUTH0_CLIENT_SECRET=replace-with-auth0-client-secret
+AUTH0_SECRET=replace-with-64-character-random-hex-string
+APP_BASE_URL=https://scholarhq-1.onrender.com
+PORT=443
+```
+
+Generate `AUTH0_SECRET` with:
+
+```bash
+openssl rand -hex 32
+```
+
+3. Confirm your Auth0 application URLs match the exact origin where the Python app is running:
+
+```text
+Allowed Callback URL: https://scholarhq-1.onrender.com/callback
+Allowed Logout URL:   https://scholarhq-1.onrender.com/
+```
+
+4. Start the Python Auth0 app:
+
+```bash
+uv run python start.py
+```
+
+The Auth0 routes are:
+
+- `/login` starts Universal Login.
+- `/login?screen_hint=signup` starts Universal Login on the signup screen.
+- `/callback` completes the Auth0 login transaction.
+- `/logout` clears the SDK session and redirects through Auth0 logout.
