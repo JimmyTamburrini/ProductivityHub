@@ -113,7 +113,7 @@
     school: "",
   };
 
-  let activeUser = loadSavedUser() || DEMO_USER;
+  let activeUser = loadSavedUser();
 
   function getScopedStorageKey(baseKey, userId) {
     const ownerId = userId || (activeUser && activeUser.id);
@@ -1591,91 +1591,57 @@
   }
 
   function renderLandingPage() {
-    return `
-      <main class="landing-shell">
-        <section class="landing-card panel" aria-labelledby="landing-title">
-          <img class="landing-logo" src="./AcademicTILT%20Branding%20Logo.png" alt="AcademicTILT logo" />
-          <h1 id="landing-title">Welcome to AcademicTILT</h1>
-          <div class="landing-actions" aria-label="Account options">
-            <button class="primary-button" type="button" data-action="switch-auth" data-mode="login">Log In</button>
-            <button class="ghost-button" type="button" data-action="switch-auth" data-mode="signup">Create Account</button>
-          </div>
-        </section>
-      </main>
-    `;
+    return renderAuthPage("login", state.authDraft, state.authErrors);
   }
 
   function renderAuthPage(mode, draft, errors) {
     const isSignup = mode === "signup";
-    const accountCount = loadAccounts().length;
+    const auth0Url = isSignup ? "/login?screen_hint=signup" : "/login";
 
     return `
       <main class="auth-shell">
         <section class="auth-card">
           <div class="auth-copy">
-            <p class="eyebrow">AcademicTILT Accounts</p>
-            <h1>${isSignup ? "Create your study account." : "Welcome back to AcademicTILT."}</h1>
+            <p class="eyebrow">Auth0 Universal Login</p>
+            <h1>${isSignup ? "Create your ScholarHQ account with Auth0." : "Log in to ScholarHQ with Auth0."}</h1>
             <p class="hero-text">
-              Sign in to keep your study sessions, class gradebooks, charts, and AI planning data separated from other students on this browser.
+              ScholarHQ now starts authentication on the server with the official Auth0 Python SDK. Your password is handled by Auth0 Universal Login, not this browser preview.
             </p>
             <div class="auth-benefits">
               <div>
-                <strong>Account-scoped data</strong>
-                <span>Your dashboard saves under your login instead of one shared browser profile.</span>
+                <strong>Server-side auth</strong>
+                <span>Login, signup, callback, logout, and session cookies are handled by the Python Auth0 SDK.</span>
               </div>
               <div>
-                <strong>Backend-ready flow</strong>
-                <span>The login screen gives us a clean path to replace local accounts with real server auth later.</span>
+                <strong>Configured tenant</strong>
+                <span>Uses the ScholarHQ Auth0 application for dev-twmic3lvibfngwhb.us.auth0.com.</span>
               </div>
               <div>
-                <strong>Important security note</strong>
-                <span>This first version is local-only. Do not use a real password until a backend database is connected.</span>
+                <strong>Preview available</strong>
+                <span>Use UI preview only for design checks; use Auth0 for real authentication testing.</span>
               </div>
             </div>
           </div>
 
-          <form class="auth-form panel" id="auth-form">
-            <input type="hidden" name="mode" value="${isSignup ? "signup" : "login"}" />
+          <div class="auth-form panel" aria-labelledby="auth0-panel-title">
             <div>
-              <p class="eyebrow">${isSignup ? "New Account" : "Login"}</p>
-              <h2>${isSignup ? "Start tracking progress" : "Open your dashboard"}</h2>
+              <p class="eyebrow">Secure Sign In</p>
+              <h2 id="auth0-panel-title">Continue with Auth0</h2>
               <p class="panel-copy">
-                ${accountCount ? `${accountCount} local account${accountCount === 1 ? "" : "s"} saved on this browser.` : "No local accounts yet. Create one to begin."}
+                This opens the Auth0-hosted login screen and returns to <code>/callback</code> after authentication.
               </p>
             </div>
 
-            ${isSignup ? `
-              <label>
-                Name
-                <input type="text" name="name" value="${escapeHtml(draft.name || "")}" autocomplete="name" placeholder="Alex Student" />
-                ${errors.name ? `<span class="field-error">${escapeHtml(errors.name)}</span>` : ""}
-              </label>
-              <label>
-                School
-                <input type="text" name="school" value="${escapeHtml(draft.school || "")}" autocomplete="organization" placeholder="Michigan State University" />
-                ${errors.school ? `<span class="field-error">${escapeHtml(errors.school)}</span>` : ""}
-              </label>
-            ` : ""}
-
-            <label>
-              Email
-              <input type="email" name="email" value="${escapeHtml(draft.email || "")}" autocomplete="email" placeholder="you@example.com" />
-              ${errors.email ? `<span class="field-error">${escapeHtml(errors.email)}</span>` : ""}
-            </label>
-
-            <label>
-              Password
-              <input type="password" name="password" autocomplete="${isSignup ? "new-password" : "current-password"}" placeholder="${isSignup ? "At least 8 characters" : "Your local password"}" />
-              ${errors.password ? `<span class="field-error">${escapeHtml(errors.password)}</span>` : ""}
-            </label>
-
             ${errors.form ? `<div class="coach-alert">${escapeHtml(errors.form)}</div>` : ""}
 
-            <button class="primary-button" type="submit">${isSignup ? "Create account" : "Log in"}</button>
+            <a class="primary-button" href="${auth0Url}">${isSignup ? "Sign up with Auth0" : "Log in with Auth0"}</a>
             <button class="ghost-button" type="button" data-action="switch-auth" data-mode="${isSignup ? "login" : "signup"}">
               ${isSignup ? "Already have an account? Log in" : "Need an account? Sign up"}
             </button>
-          </form>
+            <button class="ghost-button" type="button" data-action="start-preview">
+              Continue in UI preview mode
+            </button>
+          </div>
         </section>
       </main>
     `;
@@ -3831,9 +3797,8 @@
   // Main render function. Rebuilds the currently selected page from app state.
   function render() {
     if (!state.currentUser) {
-      state.currentUser = DEMO_USER;
-      setActiveUser(DEMO_USER);
-      reloadAccountData();
+      appRoot.innerHTML = renderLandingPage();
+      return;
     }
 
     const isEditing = Boolean(state.editingId);
@@ -4160,6 +4125,14 @@
       state.authErrors = {};
       state.authDraft = { name: "", school: "", email: state.authDraft.email || "", password: "" };
       render();
+      return;
+    }
+
+    if (action === "start-preview") {
+      state.currentUser = DEMO_USER;
+      setActiveUser(DEMO_USER);
+      reloadAccountData();
+      showFlashMessage("UI preview mode is active. Use Auth0 login for real authentication testing.");
       return;
     }
 
