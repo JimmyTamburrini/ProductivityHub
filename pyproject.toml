@@ -1,0 +1,14 @@
+[project]
+name = "scholarhq-auth0-python"
+version = "0.1.0"
+description = "ScholarHQ Auth0 Python SDK integration sample."
+requires-python = ">=3.10"
+dependencies = [
+  "auth0-server-python>=1.0.0b1,<2",
+  "flask[async]",
+  "python-dotenv",
+  "markupsafe",
+]
+
+[tool.uv]
+package = false
