@@ -28,7 +28,6 @@ from auth0_server_python.auth_types import (
 from auth0_server_python.store.abstract import AbstractDataStore
 from dotenv import load_dotenv
 from flask import Flask, after_this_request, redirect, request, send_from_directory
-from markupsafe import escape
 
 load_dotenv()
 
@@ -160,76 +159,11 @@ def build_auth_bootstrap(user):
     """
 
 
-def build_app_fallback(user):
-    """Render useful Auth0-linked HTML before the JavaScript app hydrates."""
-    if user:
-        name = escape(user.get("name") or user.get("nickname") or user.get("email") or "Student")
-        email = escape(user.get("email") or "")
-        return f"""
-          <main class="auth-shell">
-            <section class="auth-card">
-              <div class="auth-copy">
-                <p class="eyebrow">Auth0 Universal Login</p>
-                <h1>Loading your ScholarHQ dashboard.</h1>
-                <p class="hero-text">
-                  You are signed in with Auth0. ScholarHQ is loading your study workspace now.
-                </p>
-              </div>
-              <div class="auth-actions panel">
-                <p class="eyebrow">Signed In</p>
-                <h2>{name}</h2>
-                <p class="panel-copy">{email}</p>
-                <a class="ghost-button" href="/logout">Log out</a>
-              </div>
-            </section>
-          </main>
-        """
-
-    return """
-      <main class="auth-shell">
-        <section class="auth-card">
-          <div class="auth-copy">
-            <p class="eyebrow">Auth0 Universal Login</p>
-            <h1>Log in to ScholarHQ with Auth0.</h1>
-            <p class="hero-text">
-              ScholarHQ uses an Auth0 Regular Web Application with a Python Flask backend.
-              Continue through Auth0 to open the study dashboard.
-            </p>
-            <div class="auth-benefits">
-              <div>
-                <strong>Server-side auth</strong>
-                <span>Login, callback, logout, and session cookies are handled by Flask and Auth0.</span>
-              </div>
-              <div>
-                <strong>Hosted login</strong>
-                <span>Your credentials are entered on Auth0 Universal Login, not in this static page.</span>
-              </div>
-            </div>
-          </div>
-          <div class="auth-actions panel">
-            <p class="eyebrow">Secure Sign In</p>
-            <h2>Continue with Auth0</h2>
-            <p class="panel-copy">
-              If the JavaScript app has not loaded yet, these server-rendered links still start Auth0.
-            </p>
-            <a class="primary-button" href="/login">Log in with Auth0</a>
-            <a class="ghost-button" href="/login?screen_hint=signup">Sign up with Auth0</a>
-          </div>
-        </section>
-      </main>
-    """
-
-
 async def render_app():
     user = await auth0().get_user({"request": request})
     index_html = (ROOT_DIR / "index.html").read_text(encoding="utf-8")
     bootstrap = build_auth_bootstrap(user)
-    fallback = build_app_fallback(user)
-    return (
-        index_html
-        .replace('<div id="app"></div>', f'<div id="app">{fallback}</div>')
-        .replace('<script src="./src/app.bundle.js"></script>', f'{bootstrap}\n    <script src="./src/app.bundle.js"></script>')
-    )
+    return index_html.replace('<script src="./src/app.bundle.js"></script>', f'{bootstrap}\n    <script src="./src/app.bundle.js"></script>')
 
 
 @app.route("/")
