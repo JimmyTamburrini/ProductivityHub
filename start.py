@@ -13,7 +13,9 @@ Required environment variables:
 """
 
 import json
+from datetime import datetime, timezone
 from os import environ as env
+from pathlib import Path
 from urllib.parse import urlparse
 
 from auth0_server_python.auth_server.server_client import ServerClient
@@ -25,12 +27,14 @@ from auth0_server_python.auth_types import (
 )
 from auth0_server_python.store.abstract import AbstractDataStore
 from dotenv import load_dotenv
-from flask import Flask, after_this_request, redirect, request
-from markupsafe import escape
+from flask import Flask, after_this_request, redirect, request, send_from_directory
 
 load_dotenv()
 
 app = Flask(__name__)
+ROOT_DIR = Path(__file__).resolve().parent
+AUTH_ACCOUNTS_KEY = "scholarhq-auth-accounts"
+AUTH_SESSION_KEY = "scholarhq-auth-session"
 
 
 class CookieStore(AbstractDataStore):
@@ -94,25 +98,77 @@ def auth0():
     )
 
 
-@app.route("/")
-async def home():
-    user = await auth0().get_user({"request": request})
-    head = "<!DOCTYPE html><title>ScholarHQ Auth0 Login</title>"
-
-    if user:
+def build_auth_bootstrap(user):
+    """Create a small script that bridges the Auth0 session into the static app."""
+    if not user:
         return f"""
-            {head}
-            <p>Logged in as {escape(user.get("email", ""))}</p>
-            <h1>User Profile</h1>
-            <pre>{escape(json.dumps(user, indent=2))}</pre>
-            <a href="/logout">Logout</a>
+            <script>
+              window.localStorage.removeItem({json.dumps(AUTH_SESSION_KEY)});
+            </script>
         """
 
+    now = datetime.now(timezone.utc).isoformat()
+    auth_user = {
+        "id": user.get("sub") or user.get("id") or user.get("email") or "auth0-user",
+        "name": user.get("name") or user.get("nickname") or user.get("email") or "Student",
+        "email": user.get("email") or "",
+        "createdAt": now,
+        "lastLoginAt": now,
+    }
+
     return f"""
-        {head}
-        <a href="/login?screen_hint=signup">Signup</a>
-        <a href="/login">Login</a>
+        <script>
+          (function () {{
+            var accountsKey = {json.dumps(AUTH_ACCOUNTS_KEY)};
+            var sessionKey = {json.dumps(AUTH_SESSION_KEY)};
+            var authUser = {json.dumps(auth_user)};
+            var accounts = [];
+
+            try {{
+              accounts = JSON.parse(window.localStorage.getItem(accountsKey) || "[]");
+            }} catch (_error) {{
+              accounts = [];
+            }}
+
+            if (!Array.isArray(accounts)) {{
+              accounts = [];
+            }}
+
+            var existing = accounts.find(function (account) {{
+              return account.id === authUser.id || (authUser.email && account.email === authUser.email);
+            }}) || {{}};
+            var account = {{
+              id: authUser.id,
+              name: authUser.name,
+              email: authUser.email,
+              passwordHash: existing.passwordHash || "auth0-session",
+              salt: existing.salt || "auth0-session",
+              createdAt: existing.createdAt || authUser.createdAt,
+              lastLoginAt: authUser.lastLoginAt,
+              school: existing.school || "",
+            }};
+            var nextAccounts = accounts.filter(function (savedAccount) {{
+              return savedAccount.id !== account.id && savedAccount.email !== account.email;
+            }});
+
+            nextAccounts.push(account);
+            window.localStorage.setItem(accountsKey, JSON.stringify(nextAccounts));
+            window.localStorage.setItem(sessionKey, JSON.stringify({{ userId: account.id, savedAt: authUser.lastLoginAt }}));
+          }})();
+        </script>
     """
+
+
+async def render_app():
+    user = await auth0().get_user({"request": request})
+    index_html = (ROOT_DIR / "index.html").read_text(encoding="utf-8")
+    bootstrap = build_auth_bootstrap(user)
+    return index_html.replace('<script src="./src/app.bundle.js"></script>', f'{bootstrap}\n    <script src="./src/app.bundle.js"></script>')
+
+
+@app.route("/")
+async def home():
+    return await render_app()
 
 
 @app.route("/login")
@@ -147,6 +203,23 @@ async def logout():
         store_options={"request": request},
     )
     return redirect(url)
+
+
+@app.route("/src/<path:filename>")
+def src_asset(filename):
+    return send_from_directory(ROOT_DIR / "src", filename)
+
+
+@app.route("/<path:filename>")
+async def static_or_app(filename):
+    if filename in {"login", "callback", "logout"}:
+        return await render_app()
+
+    requested = (ROOT_DIR / filename).resolve()
+    if requested.is_file() and ROOT_DIR in requested.parents:
+        return send_from_directory(ROOT_DIR, filename)
+
+    return await render_app()
 
 
 if __name__ == "__main__":
