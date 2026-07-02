@@ -221,3 +221,5 @@ The Auth0 routes are:
 - `/login?screen_hint=signup` starts Universal Login on the signup screen.
 - `/callback` completes the Auth0 login transaction.
 - `/logout` clears the SDK session and redirects through Auth0 logout.
+
+The Flask entrypoint also serves the full ScholarHQ web app at `/` and static assets from the repository, so the Auth0 deployment shows the real site instead of a placeholder login page. When Auth0 returns a user, the server injects a small bootstrap script before `src/app.bundle.js` so the browser app opens the signed-in dashboard.
