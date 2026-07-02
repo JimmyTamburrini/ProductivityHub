@@ -132,87 +132,6 @@
     return `session-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   }
 
-  function generateSalt() {
-    const values = new Uint8Array(16);
-    if (window.crypto && typeof window.crypto.getRandomValues === "function") {
-      window.crypto.getRandomValues(values);
-      return Array.from(values)
-        .map(function (value) {
-          return value.toString(16).padStart(2, "0");
-        })
-        .join("");
-    }
-
-    return `salt-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  }
-
-  async function hashPassword(password, salt) {
-    const input = `${salt}:${password}`;
-
-    if (window.crypto && window.crypto.subtle && window.TextEncoder) {
-      const encoded = new TextEncoder().encode(input);
-      const digest = await window.crypto.subtle.digest("SHA-256", encoded);
-      return Array.from(new Uint8Array(digest))
-        .map(function (value) {
-          return value.toString(16).padStart(2, "0");
-        })
-        .join("");
-    }
-
-    // Fallback for older browsers. This is only for local demo accounts and is not backend-grade security.
-    var hash = 0;
-    for (var index = 0; index < input.length; index += 1) {
-      hash = (hash << 5) - hash + input.charCodeAt(index);
-      hash |= 0;
-    }
-    return String(hash);
-  }
-
-
-
-  async function callAuthApi(path, payload) {
-    if (window.location.protocol === "file:") {
-      return null;
-    }
-
-    const response = await window.fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(payload || {}),
-    });
-    const result = await response.json().catch(function () { return {}; });
-    if (!response.ok) {
-      throw new Error(result.error || "Authentication failed. Please try again.");
-    }
-    return result;
-  }
-
-  async function syncAccountFile(account) {
-    if (!account || !account.id || window.location.protocol === "file:") {
-      return;
-    }
-
-    try {
-      await window.fetch("/api/accounts", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          id: account.id,
-          name: account.name,
-          email: account.email,
-          school: account.school,
-          createdAt: account.createdAt,
-          lastLoginAt: account.lastLoginAt,
-        }),
-      });
-    } catch (_error) {
-      // The local browser account still works if the optional server-side account list is unavailable.
-    }
-  }
-
   function setActiveUser(account) {
     activeUser = account;
     if (account) {
@@ -220,43 +139,6 @@
     } else {
       window.localStorage.removeItem(AUTH_SESSION_KEY);
     }
-  }
-
-  function validateAuthFields(input, mode) {
-    const errors = {};
-    if (mode === "signup" && !String(input.name || "").trim()) {
-      errors.name = "Add your name so your dashboard can greet you.";
-    }
-
-    if (mode === "signup" && !String(input.school || "").trim()) {
-      errors.school = "Add your school so AcademicTILT can tailor study research to your classes.";
-    }
-
-    if (!normalizeEmail(input.email) || !normalizeEmail(input.email).includes("@")) {
-      errors.email = "Enter a valid email address.";
-    }
-
-    if (!String(input.password || "").trim()) {
-      errors.password = "Enter your password.";
-    } else if (mode === "signup" && String(input.password).length < 8) {
-      errors.password = "Use at least 8 characters.";
-    }
-
-    return errors;
-  }
-
-  function copyLegacyStorageToAccount(userId) {
-    [STORAGE_KEY, GRADE_STORAGE_KEY, CLASS_GRADES_STORAGE_KEY, CLASS_CATALOG_STORAGE_KEY].forEach(function (baseKey) {
-      const scopedKey = getScopedStorageKey(baseKey, userId);
-      if (window.localStorage.getItem(scopedKey)) {
-        return;
-      }
-
-      const legacyValue = window.localStorage.getItem(baseKey);
-      if (legacyValue) {
-        window.localStorage.setItem(scopedKey, legacyValue);
-      }
-    });
   }
 
   function reloadAccountData() {
@@ -1659,7 +1541,7 @@
           </div>
         </div>
         <div class="nav-account">
-          <span>UI preview mode</span>
+          <span>${escapeHtml(currentUser.name || currentUser.email || "Signed in")}</span>
         </div>
         <div class="nav-links">
           ${PAGE_DEFINITIONS
@@ -3507,9 +3389,6 @@
   // This object is the "single source of truth" for what the UI should show.
   const state = {
     currentUser: activeUser,
-    authMode: "landing",
-    authErrors: {},
-    authDraft: { name: "", school: "", email: "", password: "" },
     sessions: activeUser ? loadSessions() : [],
     draft: blankDraft(),
     errors: {},
@@ -3854,119 +3733,6 @@
   // Shared submit handler for every form in the app.
   async function handleSubmit(form, event) {
     event.preventDefault();
-
-    if (form.id === "auth-form") {
-      const formData = new FormData(form);
-      const mode = String(formData.get("mode") || "login");
-      const input = {
-        name: String(formData.get("name") || "").trim(),
-        school: String(formData.get("school") || "").trim(),
-        email: normalizeEmail(formData.get("email")),
-        password: String(formData.get("password") || ""),
-      };
-
-      state.authDraft = { name: input.name, school: input.school, email: input.email, password: "" };
-      state.authMode = mode === "signup" ? "signup" : "login";
-      state.authErrors = validateAuthFields(input, state.authMode);
-
-      if (Object.keys(state.authErrors).length > 0) {
-        render();
-        return;
-      }
-
-      const accounts = loadAccounts();
-      const existing = accounts.find(function (account) {
-        return account.email === input.email;
-      });
-
-      if (state.authMode === "signup") {
-        if (existing && window.location.protocol === "file:") {
-          state.authErrors = { email: "An account with this email already exists on this browser." };
-          render();
-          return;
-        }
-
-        try {
-          await callAuthApi("/api/auth/signup", {
-            name: input.name,
-            full_name: input.name,
-            school: input.school,
-            email: input.email,
-            password: input.password,
-          });
-        } catch (error) {
-          state.authErrors = { form: error.message || "Could not create your secure account." };
-          render();
-          return;
-        }
-
-        const salt = generateSalt();
-        const now = new Date().toISOString();
-        const account = {
-          id: authResult && authResult.user && authResult.user.id ? authResult.user.id : generateId(),
-          name: input.name,
-          email: input.email,
-          school: input.school,
-          passwordHash: await hashPassword(input.password, salt),
-          salt: salt,
-          createdAt: now,
-          lastLoginAt: now,
-        };
-
-        const nextAccounts = accounts.filter(function (savedAccount) {
-          return savedAccount.email !== account.email && savedAccount.id !== account.id;
-        }).concat(account);
-        saveAccounts(nextAccounts);
-        await syncAccountFile(account);
-        setActiveUser(account);
-        copyLegacyStorageToAccount(account.id);
-        state.currentUser = account;
-        state.authErrors = {};
-        state.authDraft = { name: "", school: "", email: "", password: "" };
-        reloadAccountData();
-        showFlashMessage(`Welcome to AcademicTILT, ${account.name}. Your secure account workspace is ready.`);
-        return;
-      }
-
-      if (!existing || existing.passwordHash !== await hashPassword(input.password, existing.salt)) {
-        state.authErrors = { form: "Email or password did not match an account." };
-        render();
-        return;
-      }
-
-      try {
-        await callAuthApi("/api/auth/login", { email: input.email, password: input.password });
-      } catch (error) {
-        state.authErrors = { form: error.message || "Could not start a secure session." };
-        render();
-        return;
-      }
-
-      const serverUser = authResult && authResult.user ? authResult.user : null;
-      const salt = existing ? existing.salt : generateSalt();
-      const updatedAccount = {
-        id: serverUser && serverUser.id ? serverUser.id : existing.id,
-        name: serverUser && serverUser.full_name ? serverUser.full_name : (existing && existing.name) || "Student",
-        email: serverUser && serverUser.email ? serverUser.email : existing.email,
-        school: (existing && existing.school) || "",
-        passwordHash: existing ? existing.passwordHash : await hashPassword(input.password, salt),
-        salt: salt,
-        createdAt: (existing && existing.createdAt) || (serverUser && serverUser.created_at) || new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-      };
-      saveAccounts(accounts.filter(function (account) {
-        return account.email !== updatedAccount.email && account.id !== updatedAccount.id;
-      }).concat(updatedAccount));
-      await syncAccountFile(updatedAccount);
-      setActiveUser(updatedAccount);
-      copyLegacyStorageToAccount(updatedAccount.id);
-      state.currentUser = updatedAccount;
-      state.authErrors = {};
-      state.authDraft = { name: "", school: "", email: "", password: "" };
-      reloadAccountData();
-      showFlashMessage(`Welcome back, ${updatedAccount.name}.`);
-      return;
-    }
 
     if (form.id === "profile-setup-form") {
       if (saveClassFromForm(form, true)) {
@@ -4410,7 +4176,6 @@
   // STARTUP / EVENT WIRING
   // These listeners connect the rendered HTML back to the JavaScript logic.
   const handledFormIds = new Set([
-    "auth-form",
     "profile-setup-form",
     "class-catalog-form",
     "session-form",

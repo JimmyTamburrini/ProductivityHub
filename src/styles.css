@@ -280,8 +280,8 @@ body::before {
   line-height: 1.55;
 }
 
-/* Login/sign-up form column. */
-.auth-form {
+/* Auth0 action column. */
+.auth-actions {
   display: grid;
   gap: 16px;
   align-content: start;
