@@ -13,7 +13,9 @@ Required environment variables:
 """
 
 import json
+from datetime import datetime, timezone
 from os import environ as env
+from pathlib import Path
 from urllib.parse import urlparse
 
 from auth0_server_python.auth_server.server_client import ServerClient
@@ -25,12 +27,15 @@ from auth0_server_python.auth_types import (
 )
 from auth0_server_python.store.abstract import AbstractDataStore
 from dotenv import load_dotenv
-from flask import Flask, after_this_request, redirect, request
+from flask import Flask, after_this_request, redirect, request, send_from_directory
 from markupsafe import escape
 
 load_dotenv()
 
 app = Flask(__name__)
+ROOT_DIR = Path(__file__).resolve().parent
+AUTH_ACCOUNTS_KEY = "scholarhq-auth-accounts"
+AUTH_SESSION_KEY = "scholarhq-auth-session"
 
 
 class CookieStore(AbstractDataStore):
@@ -94,25 +99,142 @@ def auth0():
     )
 
 
-@app.route("/")
-async def home():
-    user = await auth0().get_user({"request": request})
-    head = "<!DOCTYPE html><title>ScholarHQ Auth0 Login</title>"
-
-    if user:
+def build_auth_bootstrap(user):
+    """Create a small script that bridges the Auth0 session into the static app."""
+    if not user:
         return f"""
-            {head}
-            <p>Logged in as {escape(user.get("email", ""))}</p>
-            <h1>User Profile</h1>
-            <pre>{escape(json.dumps(user, indent=2))}</pre>
-            <a href="/logout">Logout</a>
+            <script>
+              window.localStorage.removeItem({json.dumps(AUTH_SESSION_KEY)});
+            </script>
         """
 
+    now = datetime.now(timezone.utc).isoformat()
+    auth_user = {
+        "id": user.get("sub") or user.get("id") or user.get("email") or "auth0-user",
+        "name": user.get("name") or user.get("nickname") or user.get("email") or "Student",
+        "email": user.get("email") or "",
+        "createdAt": now,
+        "lastLoginAt": now,
+    }
+
     return f"""
-        {head}
-        <a href="/login?screen_hint=signup">Signup</a>
-        <a href="/login">Login</a>
+        <script>
+          (function () {{
+            var accountsKey = {json.dumps(AUTH_ACCOUNTS_KEY)};
+            var sessionKey = {json.dumps(AUTH_SESSION_KEY)};
+            var authUser = {json.dumps(auth_user)};
+            var accounts = [];
+
+            try {{
+              accounts = JSON.parse(window.localStorage.getItem(accountsKey) || "[]");
+            }} catch (_error) {{
+              accounts = [];
+            }}
+
+            if (!Array.isArray(accounts)) {{
+              accounts = [];
+            }}
+
+            var existing = accounts.find(function (account) {{
+              return account.id === authUser.id || (authUser.email && account.email === authUser.email);
+            }}) || {{}};
+            var account = {{
+              id: authUser.id,
+              name: authUser.name,
+              email: authUser.email,
+              passwordHash: existing.passwordHash || "auth0-session",
+              salt: existing.salt || "auth0-session",
+              createdAt: existing.createdAt || authUser.createdAt,
+              lastLoginAt: authUser.lastLoginAt,
+              school: existing.school || "",
+            }};
+            var nextAccounts = accounts.filter(function (savedAccount) {{
+              return savedAccount.id !== account.id && savedAccount.email !== account.email;
+            }});
+
+            nextAccounts.push(account);
+            window.localStorage.setItem(accountsKey, JSON.stringify(nextAccounts));
+            window.localStorage.setItem(sessionKey, JSON.stringify({{ userId: account.id, savedAt: authUser.lastLoginAt }}));
+          }})();
+        </script>
     """
+
+
+def build_app_fallback(user):
+    """Render useful Auth0-linked HTML before the JavaScript app hydrates."""
+    if user:
+        name = escape(user.get("name") or user.get("nickname") or user.get("email") or "Student")
+        email = escape(user.get("email") or "")
+        return f"""
+          <main class="auth-shell">
+            <section class="auth-card">
+              <div class="auth-copy">
+                <p class="eyebrow">Auth0 Universal Login</p>
+                <h1>Loading your ScholarHQ dashboard.</h1>
+                <p class="hero-text">
+                  You are signed in with Auth0. ScholarHQ is loading your study workspace now.
+                </p>
+              </div>
+              <div class="auth-actions panel">
+                <p class="eyebrow">Signed In</p>
+                <h2>{name}</h2>
+                <p class="panel-copy">{email}</p>
+                <a class="ghost-button" href="/logout">Log out</a>
+              </div>
+            </section>
+          </main>
+        """
+
+    return """
+      <main class="auth-shell">
+        <section class="auth-card">
+          <div class="auth-copy">
+            <p class="eyebrow">Auth0 Universal Login</p>
+            <h1>Log in to ScholarHQ with Auth0.</h1>
+            <p class="hero-text">
+              ScholarHQ uses an Auth0 Regular Web Application with a Python Flask backend.
+              Continue through Auth0 to open the study dashboard.
+            </p>
+            <div class="auth-benefits">
+              <div>
+                <strong>Server-side auth</strong>
+                <span>Login, callback, logout, and session cookies are handled by Flask and Auth0.</span>
+              </div>
+              <div>
+                <strong>Hosted login</strong>
+                <span>Your credentials are entered on Auth0 Universal Login, not in this static page.</span>
+              </div>
+            </div>
+          </div>
+          <div class="auth-actions panel">
+            <p class="eyebrow">Secure Sign In</p>
+            <h2>Continue with Auth0</h2>
+            <p class="panel-copy">
+              If the JavaScript app has not loaded yet, these server-rendered links still start Auth0.
+            </p>
+            <a class="primary-button" href="/login">Log in with Auth0</a>
+            <a class="ghost-button" href="/login?screen_hint=signup">Sign up with Auth0</a>
+          </div>
+        </section>
+      </main>
+    """
+
+
+async def render_app():
+    user = await auth0().get_user({"request": request})
+    index_html = (ROOT_DIR / "index.html").read_text(encoding="utf-8")
+    bootstrap = build_auth_bootstrap(user)
+    fallback = build_app_fallback(user)
+    return (
+        index_html
+        .replace('<div id="app"></div>', f'<div id="app">{fallback}</div>')
+        .replace('<script src="./src/app.bundle.js"></script>', f'{bootstrap}\n    <script src="./src/app.bundle.js"></script>')
+    )
+
+
+@app.route("/")
+async def home():
+    return await render_app()
 
 
 @app.route("/login")
@@ -147,6 +269,23 @@ async def logout():
         store_options={"request": request},
     )
     return redirect(url)
+
+
+@app.route("/src/<path:filename>")
+def src_asset(filename):
+    return send_from_directory(ROOT_DIR / "src", filename)
+
+
+@app.route("/<path:filename>")
+async def static_or_app(filename):
+    if filename in {"login", "callback", "logout"}:
+        return await render_app()
+
+    requested = (ROOT_DIR / filename).resolve()
+    if requested.is_file() and ROOT_DIR in requested.parents:
+        return send_from_directory(ROOT_DIR, filename)
+
+    return await render_app()
 
 
 if __name__ == "__main__":
