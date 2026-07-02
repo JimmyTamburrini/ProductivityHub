@@ -102,6 +102,17 @@
     }) || null;
   }
 
+  const DEMO_USER = {
+    id: "demo-ui-preview",
+    name: "Student",
+    email: "preview@academictilt.local",
+    passwordHash: "",
+    salt: "",
+    createdAt: "",
+    lastLoginAt: "",
+    school: "",
+  };
+
   let activeUser = loadSavedUser();
 
   function getScopedStorageKey(baseKey, userId) {
@@ -1462,14 +1473,21 @@
   }
 
   function renderLandingPage() {
+    return renderAuthPage("login", state.authDraft, state.authErrors);
+  }
+
+  function renderAuthPage(mode, draft, errors) {
+    const isSignup = mode === "signup";
+    const auth0Url = isSignup ? "/login?screen_hint=signup" : "/login";
+
     return `
       <main class="auth-shell">
         <section class="auth-card">
           <div class="auth-copy">
             <p class="eyebrow">Auth0 Universal Login</p>
-            <h1>Log in to ScholarHQ with Auth0.</h1>
+            <h1>${isSignup ? "Create your ScholarHQ account with Auth0." : "Log in to ScholarHQ with Auth0."}</h1>
             <p class="hero-text">
-              ScholarHQ starts authentication on the server with the official Auth0 Python SDK. Your password is handled by Auth0 Universal Login.
+              ScholarHQ now starts authentication on the server with the official Auth0 Python SDK. Your password is handled by Auth0 Universal Login, not this browser preview.
             </p>
             <div class="auth-benefits">
               <div>
@@ -1481,13 +1499,13 @@
                 <span>Uses the ScholarHQ Auth0 application for dev-twmic3lvibfngwhb.us.auth0.com.</span>
               </div>
               <div>
-                <strong>Auth0 only</strong>
-                <span>Access to the dashboard requires completing the hosted Auth0 login or signup flow.</span>
+                <strong>Preview available</strong>
+                <span>Use UI preview only for design checks; use Auth0 for real authentication testing.</span>
               </div>
             </div>
           </div>
 
-          <div class="auth-actions panel" aria-labelledby="auth0-panel-title">
+          <div class="auth-form panel" aria-labelledby="auth0-panel-title">
             <div>
               <p class="eyebrow">Secure Sign In</p>
               <h2 id="auth0-panel-title">Continue with Auth0</h2>
@@ -1496,8 +1514,15 @@
               </p>
             </div>
 
-            <a class="primary-button" href="/login">Log in with Auth0</a>
-            <a class="ghost-button" href="/login?screen_hint=signup">Sign up with Auth0</a>
+            ${errors.form ? `<div class="coach-alert">${escapeHtml(errors.form)}</div>` : ""}
+
+            <a class="primary-button" href="${auth0Url}">${isSignup ? "Sign up with Auth0" : "Log in with Auth0"}</a>
+            <button class="ghost-button" type="button" data-action="switch-auth" data-mode="${isSignup ? "login" : "signup"}">
+              ${isSignup ? "Already have an account? Log in" : "Need an account? Sign up"}
+            </button>
+            <button class="ghost-button" type="button" data-action="start-preview">
+              Continue in UI preview mode
+            </button>
           </div>
         </section>
       </main>
@@ -3860,6 +3885,22 @@
     const action = target.dataset.action;
     const id = target.dataset.id;
     const subject = target.dataset.subject;
+
+    if (action === "switch-auth" && target.dataset.mode) {
+      state.authMode = target.dataset.mode === "signup" ? "signup" : "login";
+      state.authErrors = {};
+      state.authDraft = { name: "", school: "", email: state.authDraft.email || "", password: "" };
+      render();
+      return;
+    }
+
+    if (action === "start-preview") {
+      state.currentUser = DEMO_USER;
+      setActiveUser(DEMO_USER);
+      reloadAccountData();
+      showFlashMessage("UI preview mode is active. Use Auth0 login for real authentication testing.");
+      return;
+    }
 
     if (action === "logout") {
       return;
